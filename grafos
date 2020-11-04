@@ -1,0 +1,93 @@
+
+
+library(tidyverse)
+library(e1071)
+library(randomForest)
+library(caret)
+library(readr)
+library(DBI)
+library(utf8)
+library(readr)
+library(ROSE)
+
+Datos <- DBI::dbConnect(odbc::odbc(),
+                        Driver = "Teradata",
+                        database = "p_dw_explo",
+                        Host   = "data1n1",
+                        DBCName = "DATA1",
+                        UID    = "",
+                        PWD    = rstudioapi::askForPassword("Clave"))
+
+setwd("C://Users//")
+
+gala_conversacion<- dbGetQuery(Datos,"SELECT distinct 
+                               a1.idconversacion,
+                               cast(a2.partyid as int),
+                               a1.textoconsulta,
+                               a1.fecha,
+                               a3.intencion
+                               FROM p_dw_explo.gala_respuesta a1
+                               left join p_dw_explo.gala_conversacion a2 on a1.idconversacion=a2.idconversacion 
+                               left join p_dw_explo.gala_intencion a3 on a1.idrespuesta=a3.idrespuesta 
+                               where a1.fecha between date '2019-12-01' and date '2019-12-16' and canal='Mod-18' and a2.partyid not like '' and a2.partyid not like 'No especificado'")
+
+
+wex_consulta <- dbGetQuery(Datos,"select a1.idbusqueda,
+                                          a1.terminos,
+                                          a2.fecha,
+                                          a2.partyid,
+                                          a2.canal
+                                          from P_DW_EXPLO.wex_consulta a1
+                                          left join P_DW_EXPLO.wex_busqueda a2 on a1.idbusqueda=a2.idbusqueda
+                                            where a2.fecha > current_date - 30  ")
+
+
+online_buscador<-wex_consulta
+online_buscador$fecha<-as_datetime(online_buscador$fecha)
+
+online_buscador %>%
+  count(online_buscador$fecha)
+
+
+online_buscador %>%
+  count(online_buscador$canal)
+
+#text analytics
+head(wex_consulta)
+wex_consulta$preguntas <-iconv(wex_consulta$terminos, "latin1", "UTF-8")
+head(wex_consulta)
+wex_consulta$preguntas<-tolower(wex_consulta$preguntas)
+wex_consulta$preguntas<-removePunctuation(wex_consulta$preguntas)
+wex_consulta$preguntas<-removeWords(wex_consulta$preguntas,stopwords('es'))
+wex_consulta$preguntas<-stripWhitespace(wex_consulta$preguntas)
+wex_consulta$preguntas<-stripWhitespace(wex_consulta$preguntas)
+# Filtrar canal
+#wex_consulta_online_b<- wex_consulta %>% filter(wex_consulta$canal=="Mod-18")
+
+
+wex_final_ <-wex_consulta  %>%
+  distinct(idbusqueda,terminos,fecha,.keep_all = TRUE) 
+
+
+wex_final_untoken <- wex_final_ %>% 
+  unnest_tokens(input = "preguntas", output = "trigrama", token = "ngrams", n = 2)
+
+Tigrama_wex_final_count<-  wex_final_ %>%
+  #filter(!is.na(Busquedas_trigrama_$trigrama))   %>%
+  count(trigrama,sort=TRUE)
+
+Tigrama_wex_final_count <- Tigrama_wex_final_count %>% filter(!is.na(Tigrama_wex_final_count$trigrama))
+
+
+
+#bigrams_separated
+Tigrama_wex_final_count_diciembre <- Tigrama_wex_final_count %>%
+  separate(trigrama, c("Palabra1", "Palabra2","Palabra3"), sep = " ") %>%
+  count(Palabra1,Palabra2, Palabra3,sort = TRUE)
+
+
+Tigrama_wex_final_count_diciembre<- Tigrama_wex_final_count_diciembre %>% filter(!is.na(Tigrama_wex_final_count_diciembre$Palabra1))
+
+
+setwd("C://Users//l0304611//Desktop//MACHINE_LEARNING//Grafos_Gala_wex")
+write.csv(Tigrama_wex_final_count_sep,"wex_final_Online.csv")
